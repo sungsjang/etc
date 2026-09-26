@@ -8,7 +8,7 @@ internal sealed class AppSettings
     public int? Y { get; set; }
     public bool AlwaysOnTop { get; set; } = true;
     public bool StartWithWindows { get; set; }
-    public bool ShowWeek { get; set; }
+    public string Period { get; set; } = "1D";
 
     private static readonly string DirectoryPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
