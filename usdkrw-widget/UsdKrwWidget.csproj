@@ -5,7 +5,14 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>UsdKrwWidget</AssemblyName>
+    <RootNamespace>UsdKrwWidget</RootNamespace>
+
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>false</SelfContained>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 </Project>
