@@ -17,6 +17,7 @@ internal sealed class MainForm : Form
     private readonly Label _pairLabel = new();
     private readonly Label _rateLabel = new();
     private readonly Label _changeLabel = new();
+    private readonly Label _rangeLabel = new();
     private readonly Label _highLowLabel = new();
     private readonly Label _updatedLabel = new();
     private readonly Label _statusLabel = new();
@@ -35,7 +36,7 @@ internal sealed class MainForm : Form
     public MainForm()
     {
         Text = "USD/KRW Widget";
-        ClientSize = new Size(300, 205);
+        ClientSize = new Size(300, 210);
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
@@ -83,30 +84,36 @@ internal sealed class MainForm : Form
         _changeLabel.AutoSize = true;
         _changeLabel.Font = new Font("Segoe UI", 8f);
 
-        var x = 135;
+        var x = 124;
         foreach (var period in Periods)
         {
             var button = new Button { Text = period };
-            button.SetBounds(x, 64, 29, 23);
+            button.SetBounds(x, 64, 32, 23);
             StyleSmallButton(button, selected: period == "1D");
             var captured = period;
             button.Click += (_, _) => SetPeriod(captured);
             _periodButtons[period] = button;
             Controls.Add(button);
-            x += 31;
+            x += 34;
         }
 
-        _chart.SetBounds(11, 92, 278, 69);
+        _chart.SetBounds(11, 92, 278, 62);
         _chart.Font = new Font("Segoe UI", 7.5f);
 
+        _rangeLabel.Text = "—";
+        _rangeLabel.SetBounds(11, 157, 278, 14);
+        _rangeLabel.TextAlign = ContentAlignment.MiddleCenter;
+        _rangeLabel.ForeColor = Color.FromArgb(115, 123, 133);
+        _rangeLabel.Font = new Font("Segoe UI", 7.1f);
+
         _highLowLabel.Text = "H —   L —";
-        _highLowLabel.Location = new Point(12, 168);
+        _highLowLabel.Location = new Point(12, 176);
         _highLowLabel.AutoSize = true;
         _highLowLabel.ForeColor = Color.FromArgb(105, 113, 123);
         _highLowLabel.Font = new Font("Segoe UI", 7.5f);
 
         _updatedLabel.Text = "Updated —";
-        _updatedLabel.Location = new Point(213, 184);
+        _updatedLabel.Location = new Point(213, 192);
         _updatedLabel.AutoSize = true;
         _updatedLabel.ForeColor = Color.FromArgb(135, 142, 151);
         _updatedLabel.Font = new Font("Segoe UI", 7.2f);
@@ -114,7 +121,7 @@ internal sealed class MainForm : Form
         Controls.AddRange(new Control[]
         {
             _pairLabel, _statusLabel, _rateLabel, _changeLabel,
-            _chart, _highLowLabel, _updatedLabel
+            _chart, _rangeLabel, _highLowLabel, _updatedLabel
         });
     }
 
@@ -178,6 +185,7 @@ internal sealed class MainForm : Form
         button.Font = new Font("Segoe UI Semibold", 7.2f);
         button.TabStop = false;
         button.Padding = Padding.Empty;
+        button.TextAlign = ContentAlignment.MiddleCenter;
     }
 
     private async void MainForm_Load(object? sender, EventArgs e)
@@ -269,22 +277,15 @@ internal sealed class MainForm : Form
         foreach (var pair in _periodButtons)
             StyleSmallButton(pair.Value, pair.Key == _period);
 
+        var now = DateTime.Now;
+        var startDate = GetPeriodStart(now, _period);
+        _rangeLabel.Text = FormatPeriodRange(startDate, now.Date, _period);
+
         if (_points.Count == 0)
             return;
 
-        var now = DateTime.Now;
-        var cutoff = _period switch
-        {
-            "1D" => now.Date,
-            "1W" => now.AddDays(-7),
-            "1M" => now.AddMonths(-1),
-            "6M" => now.AddMonths(-6),
-            "1Y" => now.AddYears(-1),
-            _ => now.Date
-        };
-
         var periodPoints = _points
-            .Where(p => p.Timestamp >= cutoff)
+            .Where(p => p.Timestamp >= startDate)
             .OrderBy(p => p.Timestamp)
             .ToList();
 
@@ -308,6 +309,27 @@ internal sealed class MainForm : Form
         _highLowLabel.Text = $"H {high:N2}   L {low:N2}";
 
         _chart.SetPoints(Downsample(periodPoints, 220));
+    }
+
+    private static DateTime GetPeriodStart(DateTime now, string period) => period switch
+    {
+        "1D" => now.Date,
+        "1W" => now.Date.AddDays(-6),
+        "1M" => now.Date.AddMonths(-1),
+        "6M" => now.Date.AddMonths(-6),
+        "1Y" => now.Date.AddYears(-1),
+        _ => now.Date
+    };
+
+    private static string FormatPeriodRange(DateTime start, DateTime end, string period)
+    {
+        if (period == "1D")
+            return end.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture);
+
+        if (start.Year == end.Year)
+            return $"{start:yyyy.MM.dd}  –  {end:MM.dd}";
+
+        return $"{start:yyyy.MM.dd}  –  {end:yyyy.MM.dd}";
     }
 
     private static IReadOnlyList<RatePoint> Downsample(IReadOnlyList<RatePoint> points, int maxPoints)
