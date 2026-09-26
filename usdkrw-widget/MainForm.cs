@@ -7,7 +7,7 @@ namespace UsdKrwWidget;
 
 internal sealed class MainForm : Form
 {
-    private readonly TwelveDataClient? _client;
+    private TwelveDataClient? _client;
     private readonly RateCache _cache = new();
     private readonly List<RatePoint> _points = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 5 * 60 * 1000 };
@@ -22,10 +22,13 @@ internal sealed class MainForm : Form
     private readonly Button _dayButton = new();
     private readonly Button _weekButton = new();
     private readonly NotifyIcon _trayIcon = new();
+    private readonly ToolStripMenuItem _topMostItem = new("Always on top") { CheckOnClick = true };
+    private readonly ToolStripMenuItem _startupItem = new("Start with Windows") { CheckOnClick = true };
 
     private AppSettings _settings = new();
     private bool _showWeek;
     private bool _allowExit;
+    private bool _loadingSettings;
     private Point _dragStart;
 
     public MainForm()
@@ -49,16 +52,7 @@ internal sealed class MainForm : Form
         EnableDragging(_rateLabel);
         EnableDragging(_changeLabel);
 
-        try
-        {
-            _client = new TwelveDataClient();
-        }
-        catch (Exception ex)
-        {
-            _statusLabel.Text = "⚠ API key missing";
-            _statusLabel.ForeColor = Color.Goldenrod;
-            _updatedLabel.Text = ex.Message;
-        }
+        TryCreateClient();
 
         Load += MainForm_Load;
         FormClosing += MainForm_FormClosing;
@@ -132,22 +126,29 @@ internal sealed class MainForm : Form
     {
         var widgetMenu = new ContextMenuStrip();
         widgetMenu.Items.Add("Refresh now", null, async (_, _) => await RefreshCurrentAsync());
+        widgetMenu.Items.Add("API settings...", null, async (_, _) => await ConfigureApiKeyAsync());
         widgetMenu.Items.Add("Hide widget", null, (_, _) => HideWidget());
         widgetMenu.Items.Add(new ToolStripSeparator());
 
-        var topMostItem = new ToolStripMenuItem("Always on top") { CheckOnClick = true, Checked = true };
-        topMostItem.CheckedChanged += (_, _) =>
+        _topMostItem.Checked = true;
+        _topMostItem.CheckedChanged += (_, _) =>
         {
-            TopMost = topMostItem.Checked;
+            if (_loadingSettings)
+                return;
+
+            TopMost = _topMostItem.Checked;
             _settings.AlwaysOnTop = TopMost;
             _ = SaveSettingsAsync();
         };
-        widgetMenu.Items.Add(topMostItem);
+        widgetMenu.Items.Add(_topMostItem);
 
-        var startupItem = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true };
-        startupItem.Checked = StartupManager.IsEnabled();
-        startupItem.CheckedChanged += (_, _) => SetStartup(startupItem.Checked);
-        widgetMenu.Items.Add(startupItem);
+        _startupItem.Checked = StartupManager.IsEnabled();
+        _startupItem.CheckedChanged += (_, _) =>
+        {
+            if (!_loadingSettings)
+                SetStartup(_startupItem.Checked);
+        };
+        widgetMenu.Items.Add(_startupItem);
 
         widgetMenu.Items.Add(new ToolStripSeparator());
         widgetMenu.Items.Add("Exit", null, (_, _) => ExitApplication());
@@ -156,6 +157,7 @@ internal sealed class MainForm : Form
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("Show widget", null, (_, _) => ShowWidget());
         trayMenu.Items.Add("Refresh now", null, async (_, _) => await RefreshCurrentAsync());
+        trayMenu.Items.Add("API settings...", null, async (_, _) => await ConfigureApiKeyAsync());
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("Exit", null, (_, _) => ExitApplication());
 
@@ -185,28 +187,48 @@ internal sealed class MainForm : Form
         UpdatePeriodUi();
 
         if (_client is null)
+        {
+            var configured = await ConfigureApiKeyAsync(showCancelMessage: false);
+            if (!configured)
+            {
+                _refreshTimer.Start();
+                return;
+            }
+        }
+
+        await SyncHistoryAndCurrentAsync();
+        _refreshTimer.Start();
+    }
+
+    private async Task SyncHistoryAndCurrentAsync()
+    {
+        if (_client is null)
             return;
 
         try
         {
             _statusLabel.Text = "● SYNC";
+            _statusLabel.ForeColor = Color.FromArgb(100, 170, 235);
             var history = await _client.GetRecentFiveMinuteRatesAsync();
             MergePoints(history);
+            await _cache.SaveAsync(_points);
             await RefreshCurrentAsync();
-            _refreshTimer.Start();
         }
         catch (Exception ex)
         {
             ShowOffline(ex.Message);
             UpdatePeriodUi();
-            _refreshTimer.Start();
         }
     }
 
     private async Task RefreshCurrentAsync()
     {
         if (_client is null)
+        {
+            _statusLabel.Text = "⚠ SET API KEY";
+            _statusLabel.ForeColor = Color.Goldenrod;
             return;
+        }
 
         try
         {
@@ -225,6 +247,58 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             ShowOffline(ex.Message);
+        }
+    }
+
+    private async Task<bool> ConfigureApiKeyAsync(bool showCancelMessage = true)
+    {
+        var currentKey = Environment.GetEnvironmentVariable("TWELVE_DATA_API_KEY") ?? string.Empty;
+        using var dialog = new ApiKeyDialog(currentKey);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            if (showCancelMessage && _client is null)
+                _updatedLabel.Text = "API key is required";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(dialog.ApiKey))
+        {
+            MessageBox.Show("Please enter a Twelve Data API key.", "USD/KRW Widget",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
+
+        try
+        {
+            Environment.SetEnvironmentVariable("TWELVE_DATA_API_KEY", dialog.ApiKey, EnvironmentVariableTarget.User);
+            Environment.SetEnvironmentVariable("TWELVE_DATA_API_KEY", dialog.ApiKey, EnvironmentVariableTarget.Process);
+            _client = new TwelveDataClient();
+            _statusLabel.Text = "● SYNC";
+            _updatedLabel.Text = "Connecting...";
+            await SyncHistoryAndCurrentAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _client = null;
+            MessageBox.Show(ex.Message, "USD/KRW Widget", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowOffline(ex.Message);
+            return false;
+        }
+    }
+
+    private void TryCreateClient()
+    {
+        try
+        {
+            _client = new TwelveDataClient();
+        }
+        catch
+        {
+            _client = null;
+            _statusLabel.Text = "⚠ SET API KEY";
+            _statusLabel.ForeColor = Color.Goldenrod;
+            _updatedLabel.Text = "Right-click → API settings";
         }
     }
 
@@ -330,16 +404,26 @@ internal sealed class MainForm : Form
 
     private void RestoreWindowSettings()
     {
-        _showWeek = _settings.ShowWeek;
-        TopMost = _settings.AlwaysOnTop;
+        _loadingSettings = true;
+        try
+        {
+            _showWeek = _settings.ShowWeek;
+            TopMost = _settings.AlwaysOnTop;
+            _topMostItem.Checked = TopMost;
 
-        if (_settings.X is int x && _settings.Y is int y && IsVisibleOnAnyScreen(new Point(x, y)))
-            Location = new Point(x, y);
-        else
-            PositionAtTopRight();
+            var startupEnabled = StartupManager.IsEnabled();
+            _startupItem.Checked = startupEnabled;
+            _settings.StartWithWindows = startupEnabled;
 
-        if (_settings.StartWithWindows != StartupManager.IsEnabled())
-            _settings.StartWithWindows = StartupManager.IsEnabled();
+            if (_settings.X is int x && _settings.Y is int y && IsVisibleOnAnyScreen(new Point(x, y)))
+                Location = new Point(x, y);
+            else
+                PositionAtTopRight();
+        }
+        finally
+        {
+            _loadingSettings = false;
+        }
     }
 
     private void PositionAtTopRight()
@@ -364,6 +448,9 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
+            _loadingSettings = true;
+            _startupItem.Checked = StartupManager.IsEnabled();
+            _loadingSettings = false;
             MessageBox.Show(ex.Message, "USD/KRW Widget", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
