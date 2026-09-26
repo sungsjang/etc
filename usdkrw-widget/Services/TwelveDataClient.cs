@@ -13,11 +13,13 @@ internal sealed class TwelveDataClient
 
     private readonly string _apiKey;
 
-    public TwelveDataClient()
+    public TwelveDataClient(string? apiKey = null)
     {
-        _apiKey = Environment.GetEnvironmentVariable("TWELVE_DATA_API_KEY")
-            ?? throw new InvalidOperationException(
-                "TWELVE_DATA_API_KEY environment variable is not set.");
+        _apiKey = string.IsNullOrWhiteSpace(apiKey)
+            ? Environment.GetEnvironmentVariable("TWELVE_DATA_API_KEY")
+                ?? throw new InvalidOperationException(
+                    "TWELVE_DATA_API_KEY environment variable is not set.")
+            : apiKey.Trim();
     }
 
     public async Task<decimal> GetCurrentRateAsync(CancellationToken cancellationToken = default)
