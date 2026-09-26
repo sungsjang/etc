@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using UsdKrwWidget.Controls;
 using UsdKrwWidget.Models;
@@ -8,6 +9,7 @@ namespace UsdKrwWidget;
 internal sealed class MainForm : Form
 {
     private static readonly string[] Periods = ["1D", "1W", "1M", "6M", "1Y"];
+    private const int CornerRadius = 14;
 
     private readonly NaverFinanceClient _client = new();
     private readonly RateCache _cache = new();
@@ -21,9 +23,13 @@ internal sealed class MainForm : Form
     private readonly Label _highLowLabel = new();
     private readonly Label _updatedLabel = new();
     private readonly Label _statusLabel = new();
+    private readonly Panel _chartCard = new();
     private readonly SparklinePanel _chart = new();
+    private readonly Button _minimizeButton = new();
+    private readonly Button _closeButton = new();
     private readonly Dictionary<string, Button> _periodButtons = new();
     private readonly NotifyIcon _trayIcon = new();
+    private readonly ToolTip _toolTip = new();
     private readonly ToolStripMenuItem _topMostItem = new("Always on top") { CheckOnClick = true };
     private readonly ToolStripMenuItem _startupItem = new("Start with Windows") { CheckOnClick = true };
 
@@ -36,92 +42,131 @@ internal sealed class MainForm : Form
     public MainForm()
     {
         Text = "USD/KRW Widget";
-        ClientSize = new Size(300, 210);
+        ClientSize = new Size(316, 232);
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        BackColor = Color.FromArgb(247, 249, 251);
-        ForeColor = Color.FromArgb(39, 46, 55);
+        BackColor = Color.FromArgb(250, 252, 255);
+        ForeColor = Color.FromArgb(35, 43, 52);
         Font = new Font("Segoe UI", 8.5f);
         ShowInTaskbar = false;
 
-        PositionAtTopRight();
+        SetStyle(
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer |
+            ControlStyles.ResizeRedraw |
+            ControlStyles.UserPaint,
+            true);
+
         BuildUi();
         BuildMenusAndTray();
+        UpdateRoundedRegion();
+        PositionAtTopRight();
 
         EnableDragging(this);
         EnableDragging(_pairLabel);
         EnableDragging(_rateLabel);
         EnableDragging(_changeLabel);
 
+        Paint += MainForm_Paint;
+        Resize += (_, _) => UpdateRoundedRegion();
         Load += MainForm_Load;
         FormClosing += MainForm_FormClosing;
         _refreshTimer.Tick += async (_, _) => await RefreshCurrentAsync();
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            const int CsDropShadow = 0x00020000;
+            var cp = base.CreateParams;
+            cp.ClassStyle |= CsDropShadow;
+            return cp;
+        }
     }
 
     private void BuildUi()
     {
         _pairLabel.Text = "USD/KRW · NAVER";
         _pairLabel.Font = new Font("Segoe UI Semibold", 9f);
-        _pairLabel.ForeColor = Color.FromArgb(72, 81, 92);
-        _pairLabel.Location = new Point(11, 8);
+        _pairLabel.ForeColor = Color.FromArgb(66, 77, 89);
+        _pairLabel.Location = new Point(14, 11);
         _pairLabel.AutoSize = true;
 
         _statusLabel.Text = "● LIVE";
-        _statusLabel.ForeColor = Color.FromArgb(24, 148, 88);
-        _statusLabel.Font = new Font("Segoe UI Semibold", 7.5f);
-        _statusLabel.Location = new Point(244, 9);
+        _statusLabel.ForeColor = Color.FromArgb(22, 145, 86);
+        _statusLabel.Font = new Font("Segoe UI Semibold", 7.4f);
+        _statusLabel.Location = new Point(207, 12);
         _statusLabel.AutoSize = true;
+
+        ConfigureWindowButton(_minimizeButton, "−", new Point(264, 6), isClose: false);
+        ConfigureWindowButton(_closeButton, "×", new Point(289, 6), isClose: true);
+        _minimizeButton.Click += (_, _) => HideWidget();
+        _closeButton.Click += (_, _) => ExitApplication();
+        _toolTip.SetToolTip(_minimizeButton, "Minimize to tray");
+        _toolTip.SetToolTip(_closeButton, "Close");
 
         _rateLabel.Text = "—";
         _rateLabel.Font = new Font("Segoe UI Semibold", 23f);
-        _rateLabel.ForeColor = Color.FromArgb(28, 34, 42);
-        _rateLabel.Location = new Point(9, 29);
+        _rateLabel.ForeColor = Color.FromArgb(24, 31, 39);
+        _rateLabel.Location = new Point(13, 35);
         _rateLabel.AutoSize = true;
 
         _changeLabel.Text = "Waiting for data";
-        _changeLabel.Location = new Point(13, 68);
+        _changeLabel.Location = new Point(16, 73);
         _changeLabel.AutoSize = true;
-        _changeLabel.Font = new Font("Segoe UI", 8f);
+        _changeLabel.Font = new Font("Segoe UI", 8.1f);
 
-        var x = 124;
+        var x = 119;
         foreach (var period in Periods)
         {
             var button = new Button { Text = period };
-            button.SetBounds(x, 64, 32, 23);
+            button.SetBounds(x, 69, 34, 24);
             StyleSmallButton(button, selected: period == "1D");
+            ApplyRoundedRegion(button, 6);
+            button.Resize += (_, _) => ApplyRoundedRegion(button, 6);
             var captured = period;
             button.Click += (_, _) => SetPeriod(captured);
             _periodButtons[period] = button;
             Controls.Add(button);
-            x += 34;
+            x += 37;
         }
 
-        _chart.SetBounds(11, 92, 278, 62);
+        _chartCard.SetBounds(12, 100, 292, 83);
+        _chartCard.BackColor = Color.White;
+        _chartCard.Paint += ChartCard_Paint;
+        _chartCard.Resize += (_, _) => ApplyRoundedRegion(_chartCard, 10);
+        ApplyRoundedRegion(_chartCard, 10);
+
+        _chart.SetBounds(7, 6, 278, 58);
         _chart.Font = new Font("Segoe UI", 7.5f);
 
         _rangeLabel.Text = "—";
-        _rangeLabel.SetBounds(11, 157, 278, 14);
+        _rangeLabel.SetBounds(8, 65, 276, 14);
         _rangeLabel.TextAlign = ContentAlignment.MiddleCenter;
-        _rangeLabel.ForeColor = Color.FromArgb(115, 123, 133);
+        _rangeLabel.ForeColor = Color.FromArgb(107, 117, 128);
         _rangeLabel.Font = new Font("Segoe UI", 7.1f);
 
+        _chartCard.Controls.Add(_chart);
+        _chartCard.Controls.Add(_rangeLabel);
+
         _highLowLabel.Text = "H —   L —";
-        _highLowLabel.Location = new Point(12, 176);
+        _highLowLabel.Location = new Point(15, 190);
         _highLowLabel.AutoSize = true;
-        _highLowLabel.ForeColor = Color.FromArgb(105, 113, 123);
-        _highLowLabel.Font = new Font("Segoe UI", 7.5f);
+        _highLowLabel.ForeColor = Color.FromArgb(95, 106, 118);
+        _highLowLabel.Font = new Font("Segoe UI Semibold", 7.4f);
 
         _updatedLabel.Text = "Updated —";
-        _updatedLabel.Location = new Point(213, 192);
-        _updatedLabel.AutoSize = true;
-        _updatedLabel.ForeColor = Color.FromArgb(135, 142, 151);
-        _updatedLabel.Font = new Font("Segoe UI", 7.2f);
+        _updatedLabel.SetBounds(205, 209, 96, 13);
+        _updatedLabel.TextAlign = ContentAlignment.MiddleRight;
+        _updatedLabel.ForeColor = Color.FromArgb(132, 141, 151);
+        _updatedLabel.Font = new Font("Segoe UI", 7.1f);
 
         Controls.AddRange(new Control[]
         {
-            _pairLabel, _statusLabel, _rateLabel, _changeLabel,
-            _chart, _rangeLabel, _highLowLabel, _updatedLabel
+            _pairLabel, _statusLabel, _minimizeButton, _closeButton,
+            _rateLabel, _changeLabel, _chartCard, _highLowLabel, _updatedLabel
         });
     }
 
@@ -169,20 +214,47 @@ internal sealed class MainForm : Form
         _trayIcon.DoubleClick += (_, _) => ShowWidget();
     }
 
+    private static void ConfigureWindowButton(Button button, string text, Point location, bool isClose)
+    {
+        button.Text = text;
+        button.SetBounds(location.X, location.Y, 22, 22);
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 0;
+        button.FlatAppearance.MouseDownBackColor = isClose
+            ? Color.FromArgb(224, 75, 75)
+            : Color.FromArgb(225, 231, 238);
+        button.FlatAppearance.MouseOverBackColor = isClose
+            ? Color.FromArgb(237, 92, 92)
+            : Color.FromArgb(235, 239, 244);
+        button.BackColor = Color.Transparent;
+        button.ForeColor = isClose
+            ? Color.FromArgb(112, 119, 128)
+            : Color.FromArgb(105, 114, 124);
+        button.Font = new Font("Segoe UI", isClose ? 10f : 11f, FontStyle.Regular);
+        button.TabStop = false;
+        button.Padding = Padding.Empty;
+        button.TextAlign = ContentAlignment.MiddleCenter;
+        ApplyRoundedRegion(button, 7);
+        button.Resize += (_, _) => ApplyRoundedRegion(button, 7);
+    }
+
     private static void StyleSmallButton(Button button, bool selected)
     {
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderSize = 1;
         button.FlatAppearance.BorderColor = selected
-            ? Color.FromArgb(85, 125, 170)
-            : Color.FromArgb(219, 224, 230);
+            ? Color.FromArgb(90, 132, 181)
+            : Color.FromArgb(220, 226, 233);
+        button.FlatAppearance.MouseOverBackColor = selected
+            ? Color.FromArgb(218, 233, 250)
+            : Color.FromArgb(246, 248, 251);
         button.BackColor = selected
-            ? Color.FromArgb(226, 238, 250)
+            ? Color.FromArgb(226, 239, 253)
             : Color.White;
         button.ForeColor = selected
-            ? Color.FromArgb(42, 92, 145)
-            : Color.FromArgb(90, 99, 109);
-        button.Font = new Font("Segoe UI Semibold", 7.2f);
+            ? Color.FromArgb(43, 91, 145)
+            : Color.FromArgb(87, 98, 109);
+        button.Font = new Font("Segoe UI Semibold", 7.3f);
         button.TabStop = false;
         button.Padding = Padding.Empty;
         button.TextAlign = ContentAlignment.MiddleCenter;
@@ -230,7 +302,7 @@ internal sealed class MainForm : Form
             await _cache.SaveAsync(_points);
 
             _statusLabel.Text = "● NAVER";
-            _statusLabel.ForeColor = Color.FromArgb(24, 148, 88);
+            _statusLabel.ForeColor = Color.FromArgb(22, 145, 86);
             _updatedLabel.Text = $"Updated {now:HH:mm}";
             _trayIcon.Text = $"USD/KRW {rate:N2}";
             UpdatePeriodUi();
@@ -275,7 +347,10 @@ internal sealed class MainForm : Form
     private void UpdatePeriodUi()
     {
         foreach (var pair in _periodButtons)
+        {
             StyleSmallButton(pair.Value, pair.Key == _period);
+            ApplyRoundedRegion(pair.Value, 6);
+        }
 
         var now = DateTime.Now;
         var startDate = GetPeriodStart(now, _period);
@@ -301,12 +376,12 @@ internal sealed class MainForm : Form
         var arrow = delta >= 0 ? "▲" : "▼";
         _changeLabel.Text = $"{arrow} {delta:+0.00;-0.00;0.00}  ({percent:+0.00;-0.00;0.00}%)  {_period}";
         _changeLabel.ForeColor = delta >= 0
-            ? Color.FromArgb(24, 148, 88)
-            : Color.FromArgb(210, 69, 69);
+            ? Color.FromArgb(22, 145, 86)
+            : Color.FromArgb(211, 67, 67);
 
         var high = periodPoints.Max(p => p.Rate);
         var low = periodPoints.Min(p => p.Rate);
-        _highLowLabel.Text = $"H {high:N2}   L {low:N2}";
+        _highLowLabel.Text = $"H  {high:N2}     L  {low:N2}";
 
         _chart.SetPoints(Downsample(periodPoints, 220));
     }
@@ -327,9 +402,9 @@ internal sealed class MainForm : Form
             return end.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture);
 
         if (start.Year == end.Year)
-            return $"{start:yyyy.MM.dd}  –  {end:MM.dd}";
+            return $"{start:yyyy.MM.dd}  —  {end:MM.dd}";
 
-        return $"{start:yyyy.MM.dd}  –  {end:yyyy.MM.dd}";
+        return $"{start:yyyy.MM.dd}  —  {end:yyyy.MM.dd}";
     }
 
     private static IReadOnlyList<RatePoint> Downsample(IReadOnlyList<RatePoint> points, int maxPoints)
@@ -349,6 +424,47 @@ internal sealed class MainForm : Form
         _statusLabel.Text = "⚠ OFFLINE";
         _statusLabel.ForeColor = Color.FromArgb(188, 126, 34);
         _updatedLabel.Text = detail.Length > 23 ? detail[..23] + "…" : detail;
+    }
+
+    private void MainForm_Paint(object? sender, PaintEventArgs e)
+    {
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var path = CreateRoundedRectPath(new Rectangle(0, 0, Width - 1, Height - 1), CornerRadius);
+        using var pen = new Pen(Color.FromArgb(205, 214, 224), 1f);
+        e.Graphics.DrawPath(pen, path);
+    }
+
+    private void ChartCard_Paint(object? sender, PaintEventArgs e)
+    {
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var path = CreateRoundedRectPath(new Rectangle(0, 0, _chartCard.Width - 1, _chartCard.Height - 1), 10);
+        using var pen = new Pen(Color.FromArgb(221, 227, 234), 1f);
+        e.Graphics.DrawPath(pen, path);
+    }
+
+    private void UpdateRoundedRegion() => ApplyRoundedRegion(this, CornerRadius);
+
+    private static void ApplyRoundedRegion(Control control, int radius)
+    {
+        if (control.Width <= 0 || control.Height <= 0)
+            return;
+
+        using var path = CreateRoundedRectPath(new Rectangle(0, 0, control.Width, control.Height), radius);
+        var oldRegion = control.Region;
+        control.Region = new Region(path);
+        oldRegion?.Dispose();
+    }
+
+    private static GraphicsPath CreateRoundedRectPath(Rectangle rect, int radius)
+    {
+        var diameter = Math.Max(2, radius * 2);
+        var path = new GraphicsPath();
+        path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+        path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 90);
+        path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rect.Left, rect.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 
     private void EnableDragging(Control control)
@@ -464,6 +580,7 @@ internal sealed class MainForm : Form
         await SaveSettingsAsync();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
+        _toolTip.Dispose();
     }
 
     private Task SaveSettingsAsync() => _settings.SaveAsync();
