@@ -7,7 +7,7 @@ namespace UsdKrwWidget;
 
 internal sealed class MainForm : Form
 {
-    private TwelveDataClient? _client;
+    private readonly NaverFinanceClient _client = new();
     private readonly RateCache _cache = new();
     private readonly List<RatePoint> _points = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 5 * 60 * 1000 };
@@ -52,8 +52,6 @@ internal sealed class MainForm : Form
         EnableDragging(_rateLabel);
         EnableDragging(_changeLabel);
 
-        TryCreateClient();
-
         Load += MainForm_Load;
         FormClosing += MainForm_FormClosing;
         _refreshTimer.Tick += async (_, _) => await RefreshCurrentAsync();
@@ -61,7 +59,7 @@ internal sealed class MainForm : Form
 
     private void BuildUi()
     {
-        _pairLabel.Text = "USD/KRW";
+        _pairLabel.Text = "USD/KRW · NAVER";
         _pairLabel.Font = new Font("Segoe UI Semibold", 10f);
         _pairLabel.Location = new Point(14, 10);
         _pairLabel.AutoSize = true;
@@ -126,7 +124,6 @@ internal sealed class MainForm : Form
     {
         var widgetMenu = new ContextMenuStrip();
         widgetMenu.Items.Add("Refresh now", null, async (_, _) => await RefreshCurrentAsync());
-        widgetMenu.Items.Add("API settings...", null, async (_, _) => await ConfigureApiKeyAsync());
         widgetMenu.Items.Add("Hide widget", null, (_, _) => HideWidget());
         widgetMenu.Items.Add(new ToolStripSeparator());
 
@@ -157,7 +154,6 @@ internal sealed class MainForm : Form
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("Show widget", null, (_, _) => ShowWidget());
         trayMenu.Items.Add("Refresh now", null, async (_, _) => await RefreshCurrentAsync());
-        trayMenu.Items.Add("API settings...", null, async (_, _) => await ConfigureApiKeyAsync());
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("Exit", null, (_, _) => ExitApplication());
 
@@ -186,30 +182,18 @@ internal sealed class MainForm : Form
         _points.AddRange(await _cache.LoadAsync());
         UpdatePeriodUi();
 
-        if (_client is null)
-        {
-            var configured = await ConfigureApiKeyAsync(showCancelMessage: false);
-            _refreshTimer.Start();
-            if (!configured)
-                return;
-
-            return;
-        }
-
         await SyncHistoryAndCurrentAsync();
         _refreshTimer.Start();
     }
 
     private async Task SyncHistoryAndCurrentAsync()
     {
-        if (_client is null)
-            return;
-
         try
         {
             _statusLabel.Text = "● SYNC";
             _statusLabel.ForeColor = Color.FromArgb(100, 170, 235);
-            var history = await _client.GetRecentFiveMinuteRatesAsync();
+
+            var history = await _client.GetRecentDailyRatesAsync(30);
             MergePoints(history);
             await _cache.SaveAsync(_points);
             await RefreshCurrentAsync();
@@ -223,13 +207,6 @@ internal sealed class MainForm : Form
 
     private async Task RefreshCurrentAsync()
     {
-        if (_client is null)
-        {
-            _statusLabel.Text = "⚠ SET API KEY";
-            _statusLabel.ForeColor = Color.Goldenrod;
-            return;
-        }
-
         try
         {
             var rate = await _client.GetCurrentRateAsync();
@@ -238,7 +215,7 @@ internal sealed class MainForm : Form
             TrimAndDeduplicate();
             await _cache.SaveAsync(_points);
 
-            _statusLabel.Text = "● LIVE";
+            _statusLabel.Text = "● NAVER";
             _statusLabel.ForeColor = Color.FromArgb(70, 200, 120);
             _updatedLabel.Text = $"Updated {now:HH:mm}";
             _trayIcon.Text = $"USD/KRW {rate:N2}";
@@ -247,61 +224,6 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             ShowOffline(ex.Message);
-        }
-    }
-
-    private async Task<bool> ConfigureApiKeyAsync(bool showCancelMessage = true)
-    {
-        var currentKey = Environment.GetEnvironmentVariable("TWELVE_DATA_API_KEY") ?? string.Empty;
-        using var dialog = new ApiKeyDialog(currentKey);
-        if (dialog.ShowDialog(this) != DialogResult.OK)
-        {
-            if (showCancelMessage && _client is null)
-                _updatedLabel.Text = "API key is required";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(dialog.ApiKey))
-        {
-            MessageBox.Show("Please enter a Twelve Data API key.", "USD/KRW Widget",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return false;
-        }
-
-        try
-        {
-            var candidate = new TwelveDataClient(dialog.ApiKey);
-            await candidate.GetCurrentRateAsync();
-
-            Environment.SetEnvironmentVariable("TWELVE_DATA_API_KEY", dialog.ApiKey, EnvironmentVariableTarget.User);
-            Environment.SetEnvironmentVariable("TWELVE_DATA_API_KEY", dialog.ApiKey, EnvironmentVariableTarget.Process);
-            _client = candidate;
-            _statusLabel.Text = "● SYNC";
-            _updatedLabel.Text = "Connecting...";
-            await SyncHistoryAndCurrentAsync();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Could not validate the API key.\n\n{ex.Message}", "USD/KRW Widget",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            ShowOffline(ex.Message);
-            return false;
-        }
-    }
-
-    private void TryCreateClient()
-    {
-        try
-        {
-            _client = new TwelveDataClient();
-        }
-        catch
-        {
-            _client = null;
-            _statusLabel.Text = "⚠ SET API KEY";
-            _statusLabel.ForeColor = Color.Goldenrod;
-            _updatedLabel.Text = "Right-click → API settings";
         }
     }
 
@@ -335,7 +257,11 @@ internal sealed class MainForm : Form
 
         var now = DateTime.Now;
         var cutoff = _showWeek ? now.AddDays(-7) : now.Date;
-        var period = _points.Where(p => p.Timestamp >= cutoff).OrderBy(p => p.Timestamp).ToList();
+        var period = _points
+            .Where(p => p.Timestamp >= cutoff)
+            .OrderBy(p => p.Timestamp)
+            .ToList();
+
         if (period.Count == 0)
             period = _points.TakeLast(Math.Min(50, _points.Count)).ToList();
 
