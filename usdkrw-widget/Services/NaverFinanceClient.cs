@@ -39,37 +39,59 @@ internal sealed class NaverFinanceClient
         return price;
     }
 
-    public async Task<IReadOnlyList<RatePoint>> GetRecentDailyRatesAsync(
-        int pageSize = 30,
+    public async Task<IReadOnlyList<RatePoint>> GetDailyRatesAsync(
+        int calendarDays = 365,
         CancellationToken cancellationToken = default)
     {
-        pageSize = Math.Clamp(pageSize, 7, 100);
-        var url = "https://m.stock.naver.com/front-api/marketIndex/prices" +
-                  $"?category=exchange&reutersCode=FX_USDKRW&page=1&pageSize={pageSize}";
-
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
-        var root = document.RootElement;
-        if (!root.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException("Naver Finance returned an unexpected history response.");
-
+        calendarDays = Math.Clamp(calendarDays, 7, 400);
+        var cutoff = DateTime.Today.AddDays(-calendarDays);
         var points = new List<RatePoint>();
-        foreach (var item in result.EnumerateArray())
-        {
-            var dateText = item.TryGetProperty("localTradedAt", out var localTradedAt)
-                ? localTradedAt.GetString()
-                : null;
-            var priceText = item.TryGetProperty("closePrice", out var closePrice)
-                ? closePrice.GetString()
-                : null;
+        const int pageSize = 100;
 
-            if (TryParseNaverDate(dateText, out var timestamp) && TryParseRate(priceText, out var rate))
-                points.Add(new RatePoint(timestamp, rate));
+        for (var page = 1; page <= 5; page++)
+        {
+            var url = "https://m.stock.naver.com/front-api/marketIndex/prices" +
+                      $"?category=exchange&reutersCode=FX_USDKRW&page={page}&pageSize={pageSize}";
+
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
+            var root = document.RootElement;
+            if (!root.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Naver Finance returned an unexpected history response.");
+
+            var pageCount = 0;
+            var reachedCutoff = false;
+            foreach (var item in result.EnumerateArray())
+            {
+                pageCount++;
+                var dateText = item.TryGetProperty("localTradedAt", out var localTradedAt)
+                    ? localTradedAt.GetString()
+                    : null;
+                var priceText = item.TryGetProperty("closePrice", out var closePrice)
+                    ? closePrice.GetString()
+                    : null;
+
+                if (!TryParseNaverDate(dateText, out var timestamp) || !TryParseRate(priceText, out var rate))
+                    continue;
+
+                if (timestamp.Date < cutoff)
+                {
+                    reachedCutoff = true;
+                    continue;
+                }
+
+                points.Add(new RatePoint(timestamp.Date, rate));
+            }
+
+            if (pageCount == 0 || reachedCutoff)
+                break;
         }
 
         return points
+            .GroupBy(p => p.Timestamp.Date)
+            .Select(g => g.Last())
             .OrderBy(p => p.Timestamp)
             .ToArray();
     }
