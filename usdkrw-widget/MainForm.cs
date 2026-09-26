@@ -189,11 +189,11 @@ internal sealed class MainForm : Form
         if (_client is null)
         {
             var configured = await ConfigureApiKeyAsync(showCancelMessage: false);
+            _refreshTimer.Start();
             if (!configured)
-            {
-                _refreshTimer.Start();
                 return;
-            }
+
+            return;
         }
 
         await SyncHistoryAndCurrentAsync();
@@ -270,9 +270,12 @@ internal sealed class MainForm : Form
 
         try
         {
+            var candidate = new TwelveDataClient(dialog.ApiKey);
+            await candidate.GetCurrentRateAsync();
+
             Environment.SetEnvironmentVariable("TWELVE_DATA_API_KEY", dialog.ApiKey, EnvironmentVariableTarget.User);
             Environment.SetEnvironmentVariable("TWELVE_DATA_API_KEY", dialog.ApiKey, EnvironmentVariableTarget.Process);
-            _client = new TwelveDataClient();
+            _client = candidate;
             _statusLabel.Text = "● SYNC";
             _updatedLabel.Text = "Connecting...";
             await SyncHistoryAndCurrentAsync();
@@ -280,8 +283,8 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            _client = null;
-            MessageBox.Show(ex.Message, "USD/KRW Widget", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show($"Could not validate the API key.\n\n{ex.Message}", "USD/KRW Widget",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
             ShowOffline(ex.Message);
             return false;
         }
