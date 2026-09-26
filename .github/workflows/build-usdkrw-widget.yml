@@ -1,0 +1,42 @@
+name: Build USDKRW Widget
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'usdkrw-widget/**'
+      - '.github/workflows/build-usdkrw-widget.yml'
+  pull_request:
+    paths:
+      - 'usdkrw-widget/**'
+      - '.github/workflows/build-usdkrw-widget.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore usdkrw-widget/UsdKrwWidget.csproj
+
+      - name: Build
+        run: dotnet build usdkrw-widget/UsdKrwWidget.csproj -c Release --no-restore
+
+      - name: Publish single EXE
+        run: dotnet publish usdkrw-widget/UsdKrwWidget.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -o usdkrw-widget/dist/win-x64
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: UsdKrwWidget-win-x64
+          path: usdkrw-widget/dist/win-x64/UsdKrwWidget.exe
+          if-no-files-found: error
