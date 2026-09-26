@@ -21,16 +21,25 @@ A lightweight Windows desktop widget for monitoring the USD/KRW exchange rate us
 - Optional Start with Windows support
 - No API key or account required
 - No external chart package
-- Self-contained single-file Windows build
-- GitHub Actions Windows build/publish verification
 
-## First run
+## Recommended installation: build locally
 
-1. Download the latest `UsdKrwWidget-win-x64` artifact from the GitHub Actions workflow.
-2. Extract the ZIP.
-3. Run `UsdKrwWidget.exe`.
+To avoid browser warnings caused by downloading an unsigned executable, download only the source code and build the EXE on your own Windows PC.
 
-No API key is required.
+1. On the GitHub repository page, choose **Code → Download ZIP**.
+2. Extract the source ZIP.
+3. Open the `usdkrw-widget` folder.
+4. Double-click `build-local.bat`.
+5. The script checks for the .NET 8 SDK and builds the application automatically.
+6. When the build succeeds, the executable is created here:
+
+```text
+usdkrw-widget\dist\local\UsdKrwWidget.exe
+```
+
+The script then asks whether to run the widget immediately.
+
+If the .NET 8 SDK is not installed, `build-local.bat` explains what is missing and opens Microsoft's official .NET 8 download page. The SDK is only needed to build the app; the generated EXE is self-contained.
 
 ## Controls
 
@@ -75,7 +84,7 @@ Settings location:
 %LOCALAPPDATA%\UsdKrwWidget\settings.json
 ```
 
-## Build from source
+## Manual build from source
 
 Requirements:
 
@@ -88,25 +97,15 @@ dotnet restore
 dotnet build -c Release
 ```
 
-## Publish a single EXE
-
-Use the included script:
-
-```powershell
-.\publish.ps1
-```
-
-Or run:
+## Manual self-contained publish
 
 ```powershell
 dotnet publish .\UsdKrwWidget.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
 ```
 
-The self-contained build does not require users to install the .NET runtime separately.
+## Continuous integration
 
-## Continuous build
-
-`.github/workflows/build-usdkrw-widget.yml` builds the application on `windows-latest`, publishes a self-contained single-file executable, and uploads it as the `UsdKrwWidget-win-x64` artifact after changes to the widget project.
+`.github/workflows/build-usdkrw-widget.yml` runs on `windows-latest`, restores, compiles, and verifies that a self-contained Windows executable can be published. Executable artifacts are intentionally not uploaded for distribution; end users should build locally with `build-local.bat`.
 
 ## Data provider
 
@@ -125,7 +124,3 @@ https://m.stock.naver.com/front-api/marketIndex/prices?category=exchange&reuters
 ```
 
 These are public web endpoints used by Naver Finance rather than a documented developer API, so their response format may change in the future. The provider is intentionally isolated so parsing can be updated without redesigning the UI.
-
-## Release status
-
-The project is automatically compiled and packaged on a real Windows GitHub Actions runner after every relevant change. Runtime acceptance on the user's PC remains the final visual check for DPI, placement, and Naver network access.
