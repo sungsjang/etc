@@ -1,13 +1,13 @@
 # USD/KRW Windows Widget
 
-A lightweight Windows desktop widget for monitoring the USD/KRW exchange rate.
+A lightweight Windows desktop widget for monitoring the USD/KRW exchange rate using Naver Finance data.
 
 ## Features
 
 - Small borderless WinForms widget
 - Opens near the upper-right corner of the primary monitor
 - Always-on-top by default
-- Current USD/KRW rate
+- Current USD/KRW rate from Naver Finance
 - 5-minute automatic refresh
 - Today's change and percentage
 - 1-day / 1-week mini chart toggle
@@ -17,7 +17,7 @@ A lightweight Windows desktop widget for monitoring the USD/KRW exchange rate.
 - Drag the widget to move it; position is remembered
 - System tray icon with show / refresh / exit
 - Optional Start with Windows support
-- In-app Twelve Data API-key setup
+- No API key or account required
 - No external chart package
 - Self-contained single-file Windows build
 - GitHub Actions Windows build/publish verification
@@ -27,18 +27,14 @@ A lightweight Windows desktop widget for monitoring the USD/KRW exchange rate.
 1. Download the latest `UsdKrwWidget-win-x64` artifact from the GitHub Actions workflow.
 2. Extract the ZIP.
 3. Run `UsdKrwWidget.exe`.
-4. On first launch, enter your Twelve Data API key in the settings dialog.
 
-The API key is stored in your Windows user environment as `TWELVE_DATA_API_KEY`. It is never committed to GitHub.
-
-You can change the key later by right-clicking the widget or tray icon and choosing **API settings...**.
+No API key is required.
 
 ## Controls
 
 Right-click the widget:
 
 - Refresh now
-- API settings...
 - Hide widget
 - Always on top
 - Start with Windows
@@ -48,7 +44,13 @@ Double-click the tray icon to show the widget again.
 
 ## Data behavior
 
-At startup the application requests recent 5-minute USD/KRW history. After startup it requests the current USD/KRW price every 5 minutes and appends it to the local cache.
+The app uses Naver Finance public market-index endpoints for USD/KRW.
+
+- Current rate: refreshed every 5 minutes from Naver Finance.
+- 1-week view: seeded from Naver's recent daily USD/KRW data and supplemented by locally collected samples.
+- 1-day view: built from locally cached samples collected every 5 minutes while the app is running. On the first run of a day, the intraday graph starts with the data available at launch and becomes denser as the app continues running.
+
+This design avoids requiring a paid or registered API while still keeping the current quote fresh.
 
 Cache location:
 
@@ -99,8 +101,22 @@ The self-contained build does not require users to install the .NET runtime sepa
 
 ## Data provider
 
-The current provider is Twelve Data using the `USD/KRW` pair and 5-minute history. The provider code is isolated in `Services/TwelveDataClient.cs` so another provider can be added later without redesigning the UI.
+The provider is isolated in `Services/NaverFinanceClient.cs`.
 
-## Current release status
+Current quote endpoint:
 
-The Windows CI pipeline has successfully completed restore, build, single-file publish, and artifact upload. The remaining acceptance step is normal end-user runtime verification on a physical Windows desktop with a valid Twelve Data API key and live network access.
+```text
+https://api.stock.naver.com/marketindex/exchange/FX_USDKRW
+```
+
+Recent daily history endpoint:
+
+```text
+https://m.stock.naver.com/front-api/marketIndex/prices?category=exchange&reutersCode=FX_USDKRW
+```
+
+These are public web endpoints used by Naver Finance rather than a documented developer API, so their response format may change in the future. The provider is intentionally isolated so parsing can be updated without redesigning the UI.
+
+## Release status
+
+The project is automatically compiled and packaged on a real Windows GitHub Actions runner after every relevant change. Runtime acceptance on the user's PC remains the final visual check for DPI, placement, and Naver network access.
