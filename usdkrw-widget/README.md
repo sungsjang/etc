@@ -14,94 +14,49 @@ A lightweight Windows desktop widget for monitoring the USD/KRW exchange rate.
 - Period high / low
 - 30-day lightweight local JSON cache
 - Offline fallback to the most recently cached data
-- Manual refresh from the right-click menu or tray menu
-- Drag the widget to move it
-- Remembers widget position and selected chart period
-- Optional **Start with Windows** setting
-- System tray icon; double-click it to show the widget
-- Closing the window hides it to the tray; use **Exit** to terminate
+- Drag the widget to move it; position is remembered
+- System tray icon with show / refresh / exit
+- Optional Start with Windows support
+- In-app Twelve Data API-key setup
 - No external chart package
-- GitHub Actions Windows build verification
-- Self-contained single-EXE publish configuration
+- Self-contained single-file Windows build
+- GitHub Actions Windows build/publish verification
 
-## Requirements
+## First run
 
-- Windows 10 or Windows 11, x64
-- Twelve Data API key
+1. Download the latest `UsdKrwWidget-win-x64` artifact from the GitHub Actions workflow.
+2. Extract the ZIP.
+3. Run `UsdKrwWidget.exe`.
+4. On first launch, enter your Twelve Data API key in the settings dialog.
 
-The release build is self-contained, so the target PC does not need a separate .NET installation.
+The API key is stored in your Windows user environment as `TWELVE_DATA_API_KEY`. It is never committed to GitHub.
 
-## API key
+You can change the key later by right-clicking the widget or tray icon and choosing **API settings...**.
 
-The API key is intentionally not stored in source code or GitHub.
+## Controls
 
-Set it in Windows PowerShell:
+Right-click the widget:
 
-```powershell
-[Environment]::SetEnvironmentVariable("TWELVE_DATA_API_KEY", "YOUR_KEY_HERE", "User")
-```
+- Refresh now
+- API settings...
+- Hide widget
+- Always on top
+- Start with Windows
+- Exit
 
-Then restart the widget. If necessary, sign out/in once so newly launched applications see the user environment variable.
-
-For a temporary PowerShell session only:
-
-```powershell
-$env:TWELVE_DATA_API_KEY="YOUR_KEY_HERE"
-```
-
-## Run from source
-
-Install the .NET 8 SDK and run:
-
-```powershell
-cd usdkrw-widget
-dotnet run
-```
-
-## Build a single EXE
-
-Use the included script:
-
-```powershell
-cd usdkrw-widget
-.\publish.ps1
-```
-
-Output:
-
-```text
-usdkrw-widget\dist\win-x64\UsdKrwWidget.exe
-```
-
-Equivalent command:
-
-```powershell
-dotnet publish UsdKrwWidget.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -o dist\win-x64
-```
-
-## GitHub Actions
-
-`.github/workflows/build-usdkrw-widget.yml` builds the project on `windows-latest` whenever relevant files are pushed to `main`.
-
-The workflow also publishes and uploads this artifact:
-
-```text
-UsdKrwWidget-win-x64 / UsdKrwWidget.exe
-```
-
-This provides a real Windows CI compile check even when development is performed through GitHub rather than on a local Windows development machine.
+Double-click the tray icon to show the widget again.
 
 ## Data behavior
 
 At startup the application requests recent 5-minute USD/KRW history. After startup it requests the current USD/KRW price every 5 minutes and appends it to the local cache.
 
-Rate cache:
+Cache location:
 
 ```text
 %LOCALAPPDATA%\UsdKrwWidget\rates.json
 ```
 
-Settings:
+Settings location:
 
 ```text
 %LOCALAPPDATA%\UsdKrwWidget\settings.json
@@ -109,21 +64,43 @@ Settings:
 
 Only the most recent 30 days of rate data are retained locally.
 
-## Windows startup
+## Build from source
 
-Right-click the widget and enable:
+Requirements:
 
-```text
-Start with Windows
+- Windows 10 or Windows 11
+- .NET 8 SDK
+
+```powershell
+cd usdkrw-widget
+dotnet restore
+dotnet build -c Release
 ```
 
-The app uses the current user's standard Windows `Run` registry entry, so administrator privileges are not required.
+## Publish a single EXE
 
-## Still optional for later versions
+Use the included script:
 
-- Refresh-interval selector
-- Better tooltip / hover values on chart
-- Exchange-rate threshold alerts
-- Optional alternate data provider fallback
-- Custom app/tray icon
-- Signed installer or automatic updater
+```powershell
+.\publish.ps1
+```
+
+Or run:
+
+```powershell
+dotnet publish .\UsdKrwWidget.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
+```
+
+The self-contained build does not require users to install the .NET runtime separately.
+
+## Continuous build
+
+`.github/workflows/build-usdkrw-widget.yml` builds the application on `windows-latest`, publishes a self-contained single-file executable, and uploads it as the `UsdKrwWidget-win-x64` artifact after changes to the widget project.
+
+## Data provider
+
+The current provider is Twelve Data using the `USD/KRW` pair and 5-minute history. The provider code is isolated in `Services/TwelveDataClient.cs` so another provider can be added later without redesigning the UI.
+
+## Current release status
+
+The Windows CI pipeline has successfully completed restore, build, single-file publish, and artifact upload. The remaining acceptance step is normal end-user runtime verification on a physical Windows desktop with a valid Twelve Data API key and live network access.
