@@ -7,7 +7,7 @@ namespace UsdKrwWidget;
 
 internal sealed class MainForm : Form
 {
-    private readonly TwelveDataClient _client;
+    private readonly TwelveDataClient? _client;
     private readonly RateCache _cache = new();
     private readonly List<RatePoint> _points = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 5 * 60 * 1000 };
@@ -21,8 +21,11 @@ internal sealed class MainForm : Form
     private readonly SparklinePanel _chart = new();
     private readonly Button _dayButton = new();
     private readonly Button _weekButton = new();
+    private readonly NotifyIcon _trayIcon = new();
 
+    private AppSettings _settings = new();
     private bool _showWeek;
+    private bool _allowExit;
     private Point _dragStart;
 
     public MainForm()
@@ -35,23 +38,16 @@ internal sealed class MainForm : Form
         BackColor = Color.FromArgb(22, 24, 28);
         ForeColor = Color.WhiteSmoke;
         Font = new Font("Segoe UI", 9f);
-        ShowInTaskbar = true;
+        ShowInTaskbar = false;
 
-        var working = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
-        Location = new Point(working.Right - Width - 16, working.Top + 16);
-
+        PositionAtTopRight();
         BuildUi();
+        BuildMenusAndTray();
+
         EnableDragging(this);
         EnableDragging(_pairLabel);
         EnableDragging(_rateLabel);
         EnableDragging(_changeLabel);
-
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Refresh now", null, async (_, _) => await RefreshCurrentAsync());
-        menu.Items.Add("Always on top", null, (_, _) => TopMost = !TopMost);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) => Close());
-        ContextMenuStrip = menu;
 
         try
         {
@@ -62,10 +58,10 @@ internal sealed class MainForm : Form
             _statusLabel.Text = "⚠ API key missing";
             _statusLabel.ForeColor = Color.Goldenrod;
             _updatedLabel.Text = ex.Message;
-            _client = null!;
         }
 
         Load += MainForm_Load;
+        FormClosing += MainForm_FormClosing;
         _refreshTimer.Tick += async (_, _) => await RefreshCurrentAsync();
     }
 
@@ -93,12 +89,24 @@ internal sealed class MainForm : Form
         _dayButton.Text = "1D";
         _dayButton.SetBounds(248, 78, 32, 25);
         StyleSmallButton(_dayButton, selected: true);
-        _dayButton.Click += (_, _) => { _showWeek = false; UpdatePeriodUi(); };
+        _dayButton.Click += (_, _) =>
+        {
+            _showWeek = false;
+            _settings.ShowWeek = false;
+            UpdatePeriodUi();
+            _ = SaveSettingsAsync();
+        };
 
         _weekButton.Text = "1W";
         _weekButton.SetBounds(284, 78, 32, 25);
         StyleSmallButton(_weekButton, selected: false);
-        _weekButton.Click += (_, _) => { _showWeek = true; UpdatePeriodUi(); };
+        _weekButton.Click += (_, _) =>
+        {
+            _showWeek = true;
+            _settings.ShowWeek = true;
+            UpdatePeriodUi();
+            _ = SaveSettingsAsync();
+        };
 
         _chart.SetBounds(14, 110, 302, 76);
         _chart.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
@@ -120,6 +128,44 @@ internal sealed class MainForm : Form
         });
     }
 
+    private void BuildMenusAndTray()
+    {
+        var widgetMenu = new ContextMenuStrip();
+        widgetMenu.Items.Add("Refresh now", null, async (_, _) => await RefreshCurrentAsync());
+        widgetMenu.Items.Add("Hide widget", null, (_, _) => HideWidget());
+        widgetMenu.Items.Add(new ToolStripSeparator());
+
+        var topMostItem = new ToolStripMenuItem("Always on top") { CheckOnClick = true, Checked = true };
+        topMostItem.CheckedChanged += (_, _) =>
+        {
+            TopMost = topMostItem.Checked;
+            _settings.AlwaysOnTop = TopMost;
+            _ = SaveSettingsAsync();
+        };
+        widgetMenu.Items.Add(topMostItem);
+
+        var startupItem = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true };
+        startupItem.Checked = StartupManager.IsEnabled();
+        startupItem.CheckedChanged += (_, _) => SetStartup(startupItem.Checked);
+        widgetMenu.Items.Add(startupItem);
+
+        widgetMenu.Items.Add(new ToolStripSeparator());
+        widgetMenu.Items.Add("Exit", null, (_, _) => ExitApplication());
+        ContextMenuStrip = widgetMenu;
+
+        var trayMenu = new ContextMenuStrip();
+        trayMenu.Items.Add("Show widget", null, (_, _) => ShowWidget());
+        trayMenu.Items.Add("Refresh now", null, async (_, _) => await RefreshCurrentAsync());
+        trayMenu.Items.Add(new ToolStripSeparator());
+        trayMenu.Items.Add("Exit", null, (_, _) => ExitApplication());
+
+        _trayIcon.Icon = SystemIcons.Application;
+        _trayIcon.Text = "USD/KRW Widget";
+        _trayIcon.Visible = true;
+        _trayIcon.ContextMenuStrip = trayMenu;
+        _trayIcon.DoubleClick += (_, _) => ShowWidget();
+    }
+
     private static void StyleSmallButton(Button button, bool selected)
     {
         button.FlatStyle = FlatStyle.Flat;
@@ -132,6 +178,9 @@ internal sealed class MainForm : Form
 
     private async void MainForm_Load(object? sender, EventArgs e)
     {
+        _settings = await AppSettings.LoadAsync();
+        RestoreWindowSettings();
+
         _points.AddRange(await _cache.LoadAsync());
         UpdatePeriodUi();
 
@@ -170,6 +219,7 @@ internal sealed class MainForm : Form
             _statusLabel.Text = "● LIVE";
             _statusLabel.ForeColor = Color.FromArgb(70, 200, 120);
             _updatedLabel.Text = $"Updated {now:HH:mm}";
+            _trayIcon.Text = $"USD/KRW {rate:N2}";
             UpdatePeriodUi();
         }
         catch (Exception ex)
@@ -266,5 +316,91 @@ internal sealed class MainForm : Form
             var screen = control.PointToScreen(e.Location);
             Location = new Point(screen.X - _dragStart.X, screen.Y - _dragStart.Y);
         };
+
+        control.MouseUp += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Left)
+                return;
+
+            _settings.X = Left;
+            _settings.Y = Top;
+            _ = SaveSettingsAsync();
+        };
     }
+
+    private void RestoreWindowSettings()
+    {
+        _showWeek = _settings.ShowWeek;
+        TopMost = _settings.AlwaysOnTop;
+
+        if (_settings.X is int x && _settings.Y is int y && IsVisibleOnAnyScreen(new Point(x, y)))
+            Location = new Point(x, y);
+        else
+            PositionAtTopRight();
+
+        if (_settings.StartWithWindows != StartupManager.IsEnabled())
+            _settings.StartWithWindows = StartupManager.IsEnabled();
+    }
+
+    private void PositionAtTopRight()
+    {
+        var working = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
+        Location = new Point(working.Right - Width - 16, working.Top + 16);
+    }
+
+    private static bool IsVisibleOnAnyScreen(Point location)
+    {
+        var testRect = new Rectangle(location, new Size(100, 50));
+        return Screen.AllScreens.Any(screen => screen.WorkingArea.IntersectsWith(testRect));
+    }
+
+    private void SetStartup(bool enabled)
+    {
+        try
+        {
+            StartupManager.SetEnabled(enabled);
+            _settings.StartWithWindows = enabled;
+            _ = SaveSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "USD/KRW Widget", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void HideWidget() => Hide();
+
+    private void ShowWidget()
+    {
+        Show();
+        WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    private void ExitApplication()
+    {
+        _allowExit = true;
+        Close();
+    }
+
+    private async void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (!_allowExit && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            HideWidget();
+            return;
+        }
+
+        _refreshTimer.Stop();
+        _settings.X = Left;
+        _settings.Y = Top;
+        _settings.AlwaysOnTop = TopMost;
+        _settings.ShowWeek = _showWeek;
+        await SaveSettingsAsync();
+        _trayIcon.Visible = false;
+        _trayIcon.Dispose();
+    }
+
+    private Task SaveSettingsAsync() => _settings.SaveAsync();
 }
