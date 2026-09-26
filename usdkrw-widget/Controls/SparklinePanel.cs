@@ -11,7 +11,7 @@ internal sealed class SparklinePanel : Panel
     {
         DoubleBuffered = true;
         ResizeRedraw = true;
-        BackColor = Color.FromArgb(22, 24, 28);
+        BackColor = Color.White;
     }
 
     public void SetPoints(IReadOnlyList<RatePoint> points)
@@ -24,19 +24,21 @@ internal sealed class SparklinePanel : Panel
     {
         base.OnPaint(e);
 
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var border = new Pen(Color.FromArgb(226, 230, 235)))
+            e.Graphics.DrawRectangle(border, 0, 0, Math.Max(0, Width - 1), Math.Max(0, Height - 1));
+
         if (_points.Count < 2)
         {
-            using var emptyBrush = new SolidBrush(Color.Gray);
-            e.Graphics.DrawString("No data", Font, emptyBrush, 8, 8);
+            using var emptyBrush = new SolidBrush(Color.FromArgb(130, 138, 148));
+            e.Graphics.DrawString("No data", Font, emptyBrush, 7, 7);
             return;
         }
-
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
         var min = _points.Min(p => p.Rate);
         var max = _points.Max(p => p.Rate);
         var range = Math.Max(0.0001m, max - min);
-        var pad = 6f;
+        var pad = 5f;
         var width = Math.Max(1f, ClientSize.Width - pad * 2);
         var height = Math.Max(1f, ClientSize.Height - pad * 2);
 
@@ -50,7 +52,8 @@ internal sealed class SparklinePanel : Panel
         }
 
         var rising = _points[^1].Rate >= _points[0].Rate;
-        using var pen = new Pen(rising ? Color.FromArgb(70, 200, 120) : Color.FromArgb(235, 95, 95), 2f);
+        var lineColor = rising ? Color.FromArgb(24, 148, 88) : Color.FromArgb(210, 69, 69);
+        using var pen = new Pen(lineColor, 1.8f);
         e.Graphics.DrawLines(pen, pathPoints);
     }
 }
