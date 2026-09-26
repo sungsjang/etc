@@ -4,17 +4,19 @@ A lightweight Windows desktop widget for monitoring the USD/KRW exchange rate us
 
 ## Features
 
-- Small borderless WinForms widget
+- Compact borderless WinForms widget (about 300 × 205 px)
+- Bright light-tone card-style UI
 - Opens near the upper-right corner of the primary monitor
 - Always-on-top by default
 - Current USD/KRW rate from Naver Finance
 - 5-minute automatic refresh
-- Today's change and percentage
-- 1-day / 1-week mini chart toggle
+- Period change and percentage
+- 1D / 1W / 1M / 6M / 1Y chart views
 - Period high / low
-- 30-day lightweight local JSON cache
+- Up to roughly 400 days of lightweight local JSON cache
 - Offline fallback to the most recently cached data
 - Drag the widget to move it; position is remembered
+- Last selected chart period is remembered
 - System tray icon with show / refresh / exit
 - Optional Start with Windows support
 - No API key or account required
@@ -32,6 +34,14 @@ No API key is required.
 
 ## Controls
 
+Period buttons:
+
+- `1D`: intraday samples collected locally every 5 minutes
+- `1W`: recent 7-day view
+- `1M`: recent 1-month view
+- `6M`: recent 6-month view
+- `1Y`: recent 1-year view
+
 Right-click the widget:
 
 - Refresh now
@@ -47,10 +57,11 @@ Double-click the tray icon to show the widget again.
 The app uses Naver Finance public market-index endpoints for USD/KRW.
 
 - Current rate: refreshed every 5 minutes from Naver Finance.
-- 1-week view: seeded from Naver's recent daily USD/KRW data and supplemented by locally collected samples.
-- 1-day view: built from locally cached samples collected every 5 minutes while the app is running. On the first run of a day, the intraday graph starts with the data available at launch and becomes denser as the app continues running.
+- 1D: built from locally cached 5-minute samples collected while the app is running.
+- 1W / 1M / 6M / 1Y: seeded from Naver daily USD/KRW history and supplemented by locally collected samples.
+- The app requests enough paged daily history at startup to cover approximately one year.
 
-This design avoids requiring a paid or registered API while still keeping the current quote fresh.
+On the first run of a day, the 1D graph starts with the data available at launch and becomes denser as the app continues running.
 
 Cache location:
 
@@ -63,8 +74,6 @@ Settings location:
 ```text
 %LOCALAPPDATA%\UsdKrwWidget\settings.json
 ```
-
-Only the most recent 30 days of rate data are retained locally.
 
 ## Build from source
 
@@ -109,7 +118,7 @@ Current quote endpoint:
 https://api.stock.naver.com/marketindex/exchange/FX_USDKRW
 ```
 
-Recent daily history endpoint:
+Daily history endpoint:
 
 ```text
 https://m.stock.naver.com/front-api/marketIndex/prices?category=exchange&reutersCode=FX_USDKRW
