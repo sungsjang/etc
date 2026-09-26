@@ -7,6 +7,8 @@ namespace UsdKrwWidget;
 
 internal sealed class MainForm : Form
 {
+    private static readonly string[] Periods = ["1D", "1W", "1M", "6M", "1Y"];
+
     private readonly NaverFinanceClient _client = new();
     private readonly RateCache _cache = new();
     private readonly List<RatePoint> _points = new();
@@ -19,14 +21,13 @@ internal sealed class MainForm : Form
     private readonly Label _updatedLabel = new();
     private readonly Label _statusLabel = new();
     private readonly SparklinePanel _chart = new();
-    private readonly Button _dayButton = new();
-    private readonly Button _weekButton = new();
+    private readonly Dictionary<string, Button> _periodButtons = new();
     private readonly NotifyIcon _trayIcon = new();
     private readonly ToolStripMenuItem _topMostItem = new("Always on top") { CheckOnClick = true };
     private readonly ToolStripMenuItem _startupItem = new("Start with Windows") { CheckOnClick = true };
 
     private AppSettings _settings = new();
-    private bool _showWeek;
+    private string _period = "1D";
     private bool _allowExit;
     private bool _loadingSettings;
     private Point _dragStart;
@@ -34,13 +35,13 @@ internal sealed class MainForm : Form
     public MainForm()
     {
         Text = "USD/KRW Widget";
-        ClientSize = new Size(330, 238);
+        ClientSize = new Size(300, 205);
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        BackColor = Color.FromArgb(22, 24, 28);
-        ForeColor = Color.WhiteSmoke;
-        Font = new Font("Segoe UI", 9f);
+        BackColor = Color.FromArgb(247, 249, 251);
+        ForeColor = Color.FromArgb(39, 46, 55);
+        Font = new Font("Segoe UI", 8.5f);
         ShowInTaskbar = false;
 
         PositionAtTopRight();
@@ -60,63 +61,60 @@ internal sealed class MainForm : Form
     private void BuildUi()
     {
         _pairLabel.Text = "USD/KRW · NAVER";
-        _pairLabel.Font = new Font("Segoe UI Semibold", 10f);
-        _pairLabel.Location = new Point(14, 10);
+        _pairLabel.Font = new Font("Segoe UI Semibold", 9f);
+        _pairLabel.ForeColor = Color.FromArgb(72, 81, 92);
+        _pairLabel.Location = new Point(11, 8);
         _pairLabel.AutoSize = true;
 
         _statusLabel.Text = "● LIVE";
-        _statusLabel.ForeColor = Color.FromArgb(70, 200, 120);
-        _statusLabel.Location = new Point(263, 11);
+        _statusLabel.ForeColor = Color.FromArgb(24, 148, 88);
+        _statusLabel.Font = new Font("Segoe UI Semibold", 7.5f);
+        _statusLabel.Location = new Point(244, 9);
         _statusLabel.AutoSize = true;
 
         _rateLabel.Text = "—";
-        _rateLabel.Font = new Font("Segoe UI Semibold", 27f);
-        _rateLabel.Location = new Point(12, 35);
+        _rateLabel.Font = new Font("Segoe UI Semibold", 23f);
+        _rateLabel.ForeColor = Color.FromArgb(28, 34, 42);
+        _rateLabel.Location = new Point(9, 29);
         _rateLabel.AutoSize = true;
 
         _changeLabel.Text = "Waiting for data";
-        _changeLabel.Location = new Point(17, 82);
+        _changeLabel.Location = new Point(13, 68);
         _changeLabel.AutoSize = true;
+        _changeLabel.Font = new Font("Segoe UI", 8f);
 
-        _dayButton.Text = "1D";
-        _dayButton.SetBounds(248, 78, 32, 25);
-        StyleSmallButton(_dayButton, selected: true);
-        _dayButton.Click += (_, _) =>
+        var x = 135;
+        foreach (var period in Periods)
         {
-            _showWeek = false;
-            _settings.ShowWeek = false;
-            UpdatePeriodUi();
-            _ = SaveSettingsAsync();
-        };
+            var button = new Button { Text = period };
+            button.SetBounds(x, 64, 29, 23);
+            StyleSmallButton(button, selected: period == "1D");
+            var captured = period;
+            button.Click += (_, _) => SetPeriod(captured);
+            _periodButtons[period] = button;
+            Controls.Add(button);
+            x += 31;
+        }
 
-        _weekButton.Text = "1W";
-        _weekButton.SetBounds(284, 78, 32, 25);
-        StyleSmallButton(_weekButton, selected: false);
-        _weekButton.Click += (_, _) =>
-        {
-            _showWeek = true;
-            _settings.ShowWeek = true;
-            UpdatePeriodUi();
-            _ = SaveSettingsAsync();
-        };
+        _chart.SetBounds(11, 92, 278, 69);
+        _chart.Font = new Font("Segoe UI", 7.5f);
 
-        _chart.SetBounds(14, 110, 302, 76);
-        _chart.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-
-        _highLowLabel.Text = "H —    L —";
-        _highLowLabel.Location = new Point(16, 193);
+        _highLowLabel.Text = "H —   L —";
+        _highLowLabel.Location = new Point(12, 168);
         _highLowLabel.AutoSize = true;
-        _highLowLabel.ForeColor = Color.Silver;
+        _highLowLabel.ForeColor = Color.FromArgb(105, 113, 123);
+        _highLowLabel.Font = new Font("Segoe UI", 7.5f);
 
         _updatedLabel.Text = "Updated —";
-        _updatedLabel.Location = new Point(209, 213);
+        _updatedLabel.Location = new Point(213, 184);
         _updatedLabel.AutoSize = true;
-        _updatedLabel.ForeColor = Color.Gray;
+        _updatedLabel.ForeColor = Color.FromArgb(135, 142, 151);
+        _updatedLabel.Font = new Font("Segoe UI", 7.2f);
 
         Controls.AddRange(new Control[]
         {
             _pairLabel, _statusLabel, _rateLabel, _changeLabel,
-            _dayButton, _weekButton, _chart, _highLowLabel, _updatedLabel
+            _chart, _highLowLabel, _updatedLabel
         });
     }
 
@@ -167,11 +165,19 @@ internal sealed class MainForm : Form
     private static void StyleSmallButton(Button button, bool selected)
     {
         button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderSize = 0;
-        button.BackColor = selected ? Color.FromArgb(62, 68, 78) : Color.FromArgb(35, 38, 44);
-        button.ForeColor = Color.WhiteSmoke;
-        button.Font = new Font("Segoe UI Semibold", 8f);
+        button.FlatAppearance.BorderSize = 1;
+        button.FlatAppearance.BorderColor = selected
+            ? Color.FromArgb(85, 125, 170)
+            : Color.FromArgb(219, 224, 230);
+        button.BackColor = selected
+            ? Color.FromArgb(226, 238, 250)
+            : Color.White;
+        button.ForeColor = selected
+            ? Color.FromArgb(42, 92, 145)
+            : Color.FromArgb(90, 99, 109);
+        button.Font = new Font("Segoe UI Semibold", 7.2f);
         button.TabStop = false;
+        button.Padding = Padding.Empty;
     }
 
     private async void MainForm_Load(object? sender, EventArgs e)
@@ -191,9 +197,9 @@ internal sealed class MainForm : Form
         try
         {
             _statusLabel.Text = "● SYNC";
-            _statusLabel.ForeColor = Color.FromArgb(100, 170, 235);
+            _statusLabel.ForeColor = Color.FromArgb(58, 111, 168);
 
-            var history = await _client.GetRecentDailyRatesAsync(30);
+            var history = await _client.GetDailyRatesAsync(400);
             MergePoints(history);
             await _cache.SaveAsync(_points);
             await RefreshCurrentAsync();
@@ -216,7 +222,7 @@ internal sealed class MainForm : Form
             await _cache.SaveAsync(_points);
 
             _statusLabel.Text = "● NAVER";
-            _statusLabel.ForeColor = Color.FromArgb(70, 200, 120);
+            _statusLabel.ForeColor = Color.FromArgb(24, 148, 88);
             _updatedLabel.Text = $"Updated {now:HH:mm}";
             _trayIcon.Text = $"USD/KRW {rate:N2}";
             UpdatePeriodUi();
@@ -227,6 +233,17 @@ internal sealed class MainForm : Form
         }
     }
 
+    private void SetPeriod(string period)
+    {
+        if (!Periods.Contains(period))
+            period = "1D";
+
+        _period = period;
+        _settings.Period = period;
+        UpdatePeriodUi();
+        _ = SaveSettingsAsync();
+    }
+
     private void MergePoints(IEnumerable<RatePoint> incoming)
     {
         _points.AddRange(incoming);
@@ -235,7 +252,7 @@ internal sealed class MainForm : Form
 
     private void TrimAndDeduplicate()
     {
-        var cutoff = DateTime.Now.AddDays(-30);
+        var cutoff = DateTime.Now.AddDays(-400);
         var clean = _points
             .Where(p => p.Timestamp >= cutoff)
             .GroupBy(p => p.Timestamp)
@@ -249,39 +266,48 @@ internal sealed class MainForm : Form
 
     private void UpdatePeriodUi()
     {
-        StyleSmallButton(_dayButton, !_showWeek);
-        StyleSmallButton(_weekButton, _showWeek);
+        foreach (var pair in _periodButtons)
+            StyleSmallButton(pair.Value, pair.Key == _period);
 
         if (_points.Count == 0)
             return;
 
         var now = DateTime.Now;
-        var cutoff = _showWeek ? now.AddDays(-7) : now.Date;
-        var period = _points
+        var cutoff = _period switch
+        {
+            "1D" => now.Date,
+            "1W" => now.AddDays(-7),
+            "1M" => now.AddMonths(-1),
+            "6M" => now.AddMonths(-6),
+            "1Y" => now.AddYears(-1),
+            _ => now.Date
+        };
+
+        var periodPoints = _points
             .Where(p => p.Timestamp >= cutoff)
             .OrderBy(p => p.Timestamp)
             .ToList();
 
-        if (period.Count == 0)
-            period = _points.TakeLast(Math.Min(50, _points.Count)).ToList();
+        if (periodPoints.Count == 0)
+            periodPoints = _points.TakeLast(Math.Min(50, _points.Count)).ToList();
 
         var latest = _points[^1].Rate;
-        var first = period[0].Rate;
+        var first = periodPoints[0].Rate;
         var delta = latest - first;
         var percent = first == 0 ? 0 : delta / first * 100m;
 
         _rateLabel.Text = latest.ToString("N2", CultureInfo.InvariantCulture);
         var arrow = delta >= 0 ? "▲" : "▼";
-        _changeLabel.Text = $"{arrow} {delta:+0.00;-0.00;0.00}  ({percent:+0.00;-0.00;0.00}%)  {(_showWeek ? "1W" : "Today")}";
+        _changeLabel.Text = $"{arrow} {delta:+0.00;-0.00;0.00}  ({percent:+0.00;-0.00;0.00}%)  {_period}";
         _changeLabel.ForeColor = delta >= 0
-            ? Color.FromArgb(70, 200, 120)
-            : Color.FromArgb(235, 95, 95);
+            ? Color.FromArgb(24, 148, 88)
+            : Color.FromArgb(210, 69, 69);
 
-        var high = period.Max(p => p.Rate);
-        var low = period.Min(p => p.Rate);
-        _highLowLabel.Text = $"H {high:N2}    L {low:N2}";
+        var high = periodPoints.Max(p => p.Rate);
+        var low = periodPoints.Min(p => p.Rate);
+        _highLowLabel.Text = $"H {high:N2}   L {low:N2}";
 
-        _chart.SetPoints(Downsample(period, 260));
+        _chart.SetPoints(Downsample(periodPoints, 220));
     }
 
     private static IReadOnlyList<RatePoint> Downsample(IReadOnlyList<RatePoint> points, int maxPoints)
@@ -299,8 +325,8 @@ internal sealed class MainForm : Form
     private void ShowOffline(string detail)
     {
         _statusLabel.Text = "⚠ OFFLINE";
-        _statusLabel.ForeColor = Color.Goldenrod;
-        _updatedLabel.Text = detail.Length > 25 ? detail[..25] + "…" : detail;
+        _statusLabel.ForeColor = Color.FromArgb(188, 126, 34);
+        _updatedLabel.Text = detail.Length > 23 ? detail[..23] + "…" : detail;
     }
 
     private void EnableDragging(Control control)
@@ -336,7 +362,7 @@ internal sealed class MainForm : Form
         _loadingSettings = true;
         try
         {
-            _showWeek = _settings.ShowWeek;
+            _period = Periods.Contains(_settings.Period) ? _settings.Period : "1D";
             TopMost = _settings.AlwaysOnTop;
             _topMostItem.Checked = TopMost;
 
@@ -358,7 +384,7 @@ internal sealed class MainForm : Form
     private void PositionAtTopRight()
     {
         var working = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
-        Location = new Point(working.Right - Width - 16, working.Top + 16);
+        Location = new Point(working.Right - Width - 14, working.Top + 14);
     }
 
     private static bool IsVisibleOnAnyScreen(Point location)
@@ -412,7 +438,7 @@ internal sealed class MainForm : Form
         _settings.X = Left;
         _settings.Y = Top;
         _settings.AlwaysOnTop = TopMost;
-        _settings.ShowWeek = _showWeek;
+        _settings.Period = _period;
         await SaveSettingsAsync();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
