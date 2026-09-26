@@ -34,9 +34,28 @@ jobs:
       - name: Publish single EXE
         run: dotnet publish usdkrw-widget/UsdKrwWidget.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -o usdkrw-widget/dist/win-x64
 
-      - name: Upload executable
+      - name: Create distribution ZIP
+        shell: pwsh
+        run: |
+          $packageDir = 'usdkrw-widget/dist/package'
+          $zipPath = 'usdkrw-widget/dist/UsdKrwWidget-v1.0.0-win-x64.zip'
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item 'usdkrw-widget/dist/win-x64/UsdKrwWidget.exe' "$packageDir/UsdKrwWidget.exe"
+          @'
+          USD/KRW Widget v1.0.0
+
+          1. Extract this ZIP to any folder.
+          2. Run UsdKrwWidget.exe.
+          3. No API key is required. Exchange-rate data is retrieved from Naver Finance.
+          4. Windows SmartScreen may warn because this personal utility is not code-signed.
+
+          Source: https://github.com/sungsjang/etc/tree/main/usdkrw-widget
+          '@ | Set-Content -Path "$packageDir/README.txt" -Encoding UTF8
+          Compress-Archive -Path "$packageDir/*" -DestinationPath $zipPath -Force
+
+      - name: Upload ZIP package
         uses: actions/upload-artifact@v4
         with:
-          name: UsdKrwWidget-win-x64
-          path: usdkrw-widget/dist/win-x64/UsdKrwWidget.exe
+          name: UsdKrwWidget-v1.0.0-win-x64
+          path: usdkrw-widget/dist/UsdKrwWidget-v1.0.0-win-x64.zip
           if-no-files-found: error
